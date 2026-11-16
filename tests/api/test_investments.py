@@ -89,4 +89,3 @@ def test_criar_investimento_sem_autenticacao(base_url):
     )
 
     assert response.status_code in (401, 403)
-python -m pytest tests/api/test_investments.py -v -s
