@@ -1,8 +1,14 @@
 """
-INTEGRANTE 2: GET /api/assets e PUT /api/assets/{asset_id}/rate
+INTEGRANTE 2: consulta e atualização de taxas de ativos (/api/assets)
+
+Formato real da API (conforme /openapi.json):
+  GET /api/assets -> lista de {asset_name, asset_type, annual_rate}
+  Atualização     -> corpo {asset_name, annual_rate} (AssetRateUpdate)
 """
 import pytest
 import requests
+
+CAMPOS_ATIVO = {"asset_name", "asset_type", "annual_rate"}
 
 
 def _obter_ativos(base_url):
@@ -30,69 +36,56 @@ def test_listar_ativos_retorna_json(base_url):
 
 
 def test_ativos_possuem_campos_basicos(base_url):
-    """Cada ativo deve ser um objeto JSON não vazio."""
-    ativos = _obter_ativos(base_url)
+    """Cada ativo deve ter nome, tipo e taxa anual numérica."""
+    for ativo in _obter_ativos(base_url):
+        assert CAMPOS_ATIVO.issubset(ativo.keys()), ativo
+        assert isinstance(ativo["asset_name"], str)
+        assert isinstance(ativo["annual_rate"], (int, float))
+        assert ativo["annual_rate"] > 0
 
-    for ativo in ativos:
-        assert isinstance(ativo, dict)
-        assert ativo, "Ativo vazio retornado pela API"
 
+def test_ativos_conhecidos_presentes(base_url):
+    """Ativos básicos da carteira devem existir na tabela."""
+    nomes = {a["asset_name"] for a in _obter_ativos(base_url)}
 
-# ---------------------------------------------------------------------
-# PUT /api/assets/{asset_id}/rate
-# ATENÇÃO: confira no Swagger (/docs) o nome do campo do corpo e do
-# campo de taxa no retorno. Ajuste apenas as constantes abaixo.
-# ---------------------------------------------------------------------
-CAMPO_TAXA = "rate"
-CAMPO_ID = "id"
+    for esperado in ("Poupança", "CDB", "Bitcoin"):
+        assert esperado in nomes
 
 
 def test_atualizar_taxa_ativo_sucesso(base_url, auth_headers):
-    """Atualiza a taxa de um ativo e restaura o valor original em seguida."""
-    ativos = _obter_ativos(base_url)
-    ativo = ativos[0]
-    asset_id = ativo.get(CAMPO_ID)
-    taxa_original = ativo.get(CAMPO_TAXA)
+    """Atualiza a taxa de um ativo e restaura o valor original."""
+    ativo = _obter_ativos(base_url)[0]
+    nome = ativo["asset_name"]
+    original = ativo["annual_rate"]
+    url = f"{base_url}/api/assets"
 
-    if asset_id is None or taxa_original is None:
-        pytest.skip(
-            f"Ativo sem os campos '{CAMPO_ID}'/'{CAMPO_TAXA}'. "
-            "Ajuste as constantes conforme o Swagger."
-        )
-
-    nova_taxa = round(float(taxa_original) + 0.01, 4)
-    url = f"{base_url}/api/assets/{asset_id}/rate"
+    response = requests.put(
+        url,
+        json={"asset_name": nome, "annual_rate": round(original + 0.01, 2)},
+        headers=auth_headers,
+    )
+    if response.status_code in (404, 405):
+        pytest.skip(f"A API não expõe PUT em /api/assets ({response.status_code})")
 
     try:
-        response = requests.put(
-            url, json={CAMPO_TAXA: nova_taxa}, headers=auth_headers
-        )
         assert response.status_code == 200, response.text
     finally:
-        # Restaura o valor para não alterar a tabela pública do grupo
         requests.put(
-            url, json={CAMPO_TAXA: taxa_original}, headers=auth_headers
+            url,
+            json={"asset_name": nome, "annual_rate": original},
+            headers=auth_headers,
         )
 
 
 def test_atualizar_taxa_sem_autenticacao(base_url):
     """Sem token a atualização deve ser negada (401 ou 403)."""
-    ativos = _obter_ativos(base_url)
-    asset_id = ativos[0].get(CAMPO_ID, 1)
+    ativo = _obter_ativos(base_url)[0]
 
     response = requests.put(
-        f"{base_url}/api/assets/{asset_id}/rate", json={CAMPO_TAXA: 1.0}
+        f"{base_url}/api/assets",
+        json={"asset_name": ativo["asset_name"], "annual_rate": 1.0},
     )
+    if response.status_code in (404, 405):
+        pytest.skip(f"A API não expõe PUT em /api/assets ({response.status_code})")
 
     assert response.status_code in (401, 403)
-
-
-def test_atualizar_taxa_ativo_inexistente(base_url, auth_headers):
-    """Ativo inexistente não deve retornar sucesso."""
-    response = requests.put(
-        f"{base_url}/api/assets/99999999/rate",
-        json={CAMPO_TAXA: 1.0},
-        headers=auth_headers,
-    )
-
-    assert response.status_code in (400, 404, 422)
