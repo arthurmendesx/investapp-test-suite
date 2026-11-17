@@ -4,16 +4,38 @@ test_simulations.py
 INTEGRANTE 5: POST /api/simulate/yield-monthly (rendimento mensal)
 INTEGRANTE 6: POST /api/simulate/tax-withdrawal (resgate com otimizacao)
 """
+import pytest
 import requests
 
 YIELD_URL = "/api/simulate/yield-monthly"
 TAX_URL = "/api/simulate/tax-withdrawal"
 
 
+@pytest.fixture
+def carteira_com_ativo(base_url, auth_headers):
+    """As simulacoes exigem ativos na carteira: cria um CDB e remove ao final."""
+    payload = {
+        "asset_name": "CDB",
+        "amount": 5000.00,
+        "purchase_price": 1.00,
+        "days_invested": 180,
+        "planned_days": 720,
+    }
+    response = requests.post(
+        f"{base_url}/api/investments", json=payload, headers=auth_headers
+    )
+    assert response.status_code == 201, response.text
+    investment_id = response.json()["id"]
+    yield investment_id
+    requests.delete(
+        f"{base_url}/api/investments/{investment_id}", headers=auth_headers
+    )
+
+
 # ---------------------------------------------------------------------
 # INTEGRANTE 5: simulacao de rendimento mensal
 # ---------------------------------------------------------------------
-def test_simular_rendimento_padrao(base_url, auth_headers):
+def test_simular_rendimento_padrao(base_url, auth_headers, carteira_com_ativo):
     """Sem informar months, usa o padrao (12 meses) e retorna 200."""
     response = requests.post(
         f"{base_url}{YIELD_URL}", json={}, headers=auth_headers
@@ -23,7 +45,7 @@ def test_simular_rendimento_padrao(base_url, auth_headers):
     print(f"\n[SIM] yield-monthly (padrao): {response.json()}")
 
 
-def test_simular_rendimento_6_meses(base_url, auth_headers):
+def test_simular_rendimento_6_meses(base_url, auth_headers, carteira_com_ativo):
     """Simulacao para 6 meses retorna 200 e um JSON valido."""
     response = requests.post(
         f"{base_url}{YIELD_URL}", json={"months": 6}, headers=auth_headers
@@ -54,7 +76,7 @@ def test_simular_rendimento_sem_autenticacao(base_url):
 # ---------------------------------------------------------------------
 # INTEGRANTE 6: simulacao de resgate com otimizacao fiscal
 # ---------------------------------------------------------------------
-def test_simular_resgate_valido(base_url, auth_headers):
+def test_simular_resgate_valido(base_url, auth_headers, carteira_com_ativo):
     """Resgate de um valor alvo retorna 200 e um JSON valido."""
     response = requests.post(
         f"{base_url}{TAX_URL}",
